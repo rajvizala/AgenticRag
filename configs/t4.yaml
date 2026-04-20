@@ -1,0 +1,82 @@
+# Colab T4 (Turing SM 7.5, 16 GB) reference configuration.
+#
+# Generator: Qwen3-8B-AWQ (~5.7 GB weights).
+#   - gpu_memory_utilization 0.75 → 12 GB reserved for vLLM
+#   - Model uses 5.7 GB, leaving ~6.3 GB for KV cache
+#   - Previously, 0.85 left no room for forward-pass activations with 3
+#     concurrent self-consistency samples; 0.75 fixed the T4 OOM.
+#
+# Router: vllm backend reuses the already-running generator endpoint.
+#   No second model loaded; zero extra VRAM.
+#
+# All API-side models (embedder, reranker) run on CPU because
+# setup.sh sets CUDA_VISIBLE_DEVICES="" before starting the API process on T4.
+
+gpu:
+  name: t4
+  arch: turing
+  vram_gb: 16
+
+generator:
+  model: Qwen/Qwen3-8B-AWQ
+  quantization: awq                      # plain awq on Turing (no Marlin kernel)
+  max_model_len: 4096                    # keep KV headroom tight on T4
+  gpu_memory_utilization: 0.75           # 0.75 x 16 = 12 GB for vLLM;
+                                          # 12 - 5.7 = 6.3 GB KV cache
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  kv_cache_dtype: auto                   # FP8 KV cache not supported on Turing
+  enable_prefix_caching: true
+  enable_chunked_prefill: true
+  enforce_eager: false
+  served_model_name: generator
+
+specialist:
+  enabled: false                         # T4 cannot co-serve two models
+  model: rLLM/rLLM-FinQA-4B
+  quantization: null
+  max_model_len: 4096
+  gpu_memory_utilization: 0.85
+  served_model_name: specialist
+
+router:
+  enabled: true
+  # backend=vllm: routing calls go to the already-running generator endpoint.
+  # No second model loaded; zero extra VRAM.
+  model: Qwen/Qwen3-1.7B                # used only when backend=transformers
+  backend: vllm
+  device: cpu                            # fallback if transformers backend is used
+  max_new_tokens: 256                    # 64 was too small for the routing JSON
+
+embedding:
+  model: Qwen/Qwen3-Embedding-0.6B
+  device: cpu                            # T4: vLLM owns GPU; API-side must use CPU
+  batch_size: 32
+
+reranker:
+  model: Qwen/Qwen3-Reranker-0.6B
+  device: cpu                            # T4: same constraint as embedding
+  batch_size: 8
+
+retrieval:
+  retrieval_k: 14   # more initial candidates for the reranker
+  rerank_k: 6       # one step up from 4; stays within T4's 4096-token context budget
+  bm25_weight: 0.4
+  dense_weight: 0.6
+  rrf_k: 60
+
+generation:
+  temperature: 0.0                       # deterministic for single-shot
+  top_p: 1.0
+  self_consistency:
+    enabled: true
+    samples: 3
+    sampling_temperature: 0.6
+
+serving:
+  host: 127.0.0.1
+  port: 8000
+  api_host: 127.0.0.1
+  api_port: 8001
+  gradio_port: 7860
+  tunnel: cloudflared                    # "cloudflared" | "gradio_share" | "none"

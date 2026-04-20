@@ -1,0 +1,77 @@
+# Build / install artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.Python
+develop-eggs/
+downloads/
+.installed.cfg
+MANIFEST
+
+# Environments
+.env
+.env.local
+.venv/
+venv/
+ENV/
+env/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# FinQA data and indices (downloaded / built locally)
+data/raw/
+data/indices/
+data/checkpoints/
+data/cache/
+data/hf/
+data/logs/
+
+# Model weights (pulled by HF)
+models/
+.hf_cache/
+
+# Eval + benchmark outputs (generated)
+runs/
+outputs/
+wandb/
+
+# LangGraph SQLite checkpoints
+*.sqlite
+*.sqlite-journal
+*.db
+
+# vLLM logs / PID files
+vllm.log
+vllm.pid
+server.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Secrets
+*.pem
+*.key

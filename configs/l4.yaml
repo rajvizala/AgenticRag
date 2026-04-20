@@ -1,0 +1,90 @@
+# Colab L4 (Ada SM 8.9, 22 GB usable) reference configuration.
+#
+# Generator: Qwen3-8B-AWQ (~5.7 GB weights) with awq_marlin kernel.
+#   - Switching from Qwen3-14B-AWQ (18 GB) → 8B (5.7 GB) frees ~12 GB.
+#   - awq_marlin gives 10x+ throughput vs plain AWQ on Ada (L4).
+#   - gpu_memory_utilization 0.80 → 17.6 GB reserved for vLLM.
+#   - 17.6 - 5.7 = ~12 GB KV cache (excellent).
+#   - Embedder (0.5 GB) + reranker (0.5 GB) on CUDA: 1 GB additional.
+#   - Total GPU usage ~7 GB; plenty of headroom on 22 GB L4.
+#
+# Qwen3.5 GGUF is NOT used: vLLM 0.19.1's GGUF loader does not have a
+# weight mapping for the qwen3_5 architecture. Qwen3.5 also turns out to be
+# a hybrid Mamba-Transformer multimodal model, not a lighter text-only model.
+# Qwen3-8B-AWQ is the correct choice here.
+#
+# Specialist: disabled. setup.sh does not start a second vLLM process,
+#   so routing to it causes 404 → refusal.
+#
+# Router: vllm backend reuses the already-running generator endpoint.
+#   max_new_tokens raised to 256 (64 was too small for the routing JSON).
+
+gpu:
+  name: l4
+  arch: ada
+  vram_gb: 24
+
+generator:
+  model: Qwen/Qwen3-8B-AWQ
+  quantization: awq_marlin              # Ada has the Marlin AWQ kernel (10x+ vs plain awq)
+  max_model_len: 8192
+  gpu_memory_utilization: 0.80          # 0.80 x 22 = 17.6 GB for vLLM;
+                                         # 17.6 - 5.7 = 11.9 GB KV cache
+  max_num_seqs: 8
+  max_num_batched_tokens: 8192
+  kv_cache_dtype: fp8_e4m3             # Ada has FP8 tensor cores; halves KV memory
+  enable_prefix_caching: true
+  enable_chunked_prefill: true
+  enforce_eager: false
+  served_model_name: generator
+
+specialist:
+  enabled: false                        # setup.sh does not start a second vLLM process;
+                                         # routing to specialist causes 404 → refusal
+  model: rLLM/rLLM-FinQA-4B
+  quantization: null
+  max_model_len: 4096
+  gpu_memory_utilization: 0.90
+  served_model_name: specialist
+
+router:
+  enabled: true
+  # backend=vllm: routing calls go to the already-running generator endpoint.
+  # No second model loaded; zero extra VRAM.
+  model: Qwen/Qwen3-1.7B               # used only when backend=transformers
+  backend: vllm
+  device: cpu                           # fallback if transformers backend is used
+  max_new_tokens: 256                   # 64 was too small for the routing JSON
+
+embedding:
+  model: Qwen/Qwen3-Embedding-0.6B
+  device: cuda
+  batch_size: 64
+
+reranker:
+  model: Qwen/Qwen3-Reranker-0.6B
+  device: cuda
+  batch_size: 16
+
+retrieval:
+  retrieval_k: 20   # larger initial pool gives the reranker more candidates
+  rerank_k: 10      # pass top-10 to the LLM; retrieval_full_recall@10 = 60% vs 57.5% @5
+  bm25_weight: 0.4
+  dense_weight: 0.6
+  rrf_k: 60
+
+generation:
+  temperature: 0.0
+  top_p: 1.0
+  self_consistency:
+    enabled: true
+    samples: 3
+    sampling_temperature: 0.6
+
+serving:
+  host: 127.0.0.1
+  port: 8000
+  api_host: 127.0.0.1
+  api_port: 8001
+  gradio_port: 7860
+  tunnel: cloudflared

@@ -1,0 +1,5 @@
+# Ensure shell scripts always have LF line endings, even on Windows.
+# This prevents the "\r: command not found" error when running on Linux/Colab.
+*.sh text eol=lf
+scripts/**/*.sh text eol=lf
+Makefile text eol=lf

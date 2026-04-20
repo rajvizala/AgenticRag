@@ -1,0 +1,97 @@
+# Evaluation slices and ablation definitions.
+#
+# Every slice is a named subset of a FinQA split. Slices compose.
+# Every ablation is a named perturbation of the default pipeline.
+
+splits:
+  train: data/raw/finqa/train.json
+  dev: data/raw/finqa/dev.json
+  test: data/raw/finqa/test.json
+
+slices:
+  dev_200:
+    split: dev
+    n: 200
+    seed: 13
+    description: "First 200 dev samples (deterministic, seed=13)."
+  dev_full:
+    split: dev
+    n: null
+    seed: 13
+    description: "Full 883-sample dev set."
+  golden_50:
+    split: dev
+    n: 50
+    seed: 42
+    description: "Held-out golden set for rolling retrieval-hit-rate drift signal."
+  adversarial_row_deleted_20:
+    split: dev
+    n: 20
+    seed: 7
+    perturbation: delete_gold_row
+    description: "Dev questions with the gold table row removed; probes refusal."
+  multi_step_only:
+    split: dev
+    n: null
+    seed: 13
+    filter: "program_steps >= 2"
+    description: "Dev subset where the gold program has >=2 steps."
+  const_scaled:
+    split: dev
+    n: null
+    seed: 13
+    filter: "program_contains_any(['const_100','const_1000','const_1000000'])"
+    description: "Dev subset where the gold program uses scale constants."
+
+metrics:
+  execution_accuracy: true
+  program_accuracy: true
+  retrieval_recall_at_k: [1, 3, 5, 10]
+  full_retrieval_recall_at_k: [3, 5, 10]
+  unit_correctness: true
+  groundedness_rate: true
+  refusal_rate: true
+  latency_percentiles: [50, 90, 95, 99]
+  cost_per_correct: true
+
+ablations:
+  - id: D1_typed_vs_free_form
+    description: "Disable grammar-constrained typed output; use free-form PoT Python."
+    overrides:
+      pipeline.typed_output: false
+  - id: D2_scale_off
+    description: "Disable ScaleExtractor; model must infer scale from prose."
+    overrides:
+      pipeline.scale_extraction: false
+  - id: D3_no_router_always_generalist
+    description: "Bypass router, always call the general reasoner."
+    overrides:
+      pipeline.router: false
+  - id: D4_sc_k1
+    description: "Disable self-consistency (K=1)."
+    overrides:
+      generation.self_consistency.enabled: false
+      generation.self_consistency.samples: 1
+  - id: D4_groundedness_off
+    description: "Disable groundedness verifier; answer any generated program."
+    overrides:
+      pipeline.groundedness: false
+  - id: D5_prefix_cache_off
+    description: "Disable vLLM prefix caching (requires restart)."
+    overrides:
+      generator.enable_prefix_caching: false
+  - id: baseline_openai
+    description: "Swap the local LLM for OpenAI gpt-4o-mini; keep everything else."
+    overrides:
+      llm.backend: openai
+      llm.model: gpt-4o-mini
+
+batching:
+  eval_concurrency: 8
+  max_retries: 2
+  timeout_s: 120
+
+bootstrap:
+  confidence_level: 0.95
+  resamples: 1000
+  seed: 13

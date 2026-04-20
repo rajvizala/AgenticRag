@@ -1,0 +1,72 @@
+# L4 profile for TheFinAI/Fin-o1-8B served via vLLM.
+#
+# Notes:
+# - Fin-o1-8B is a fine-tuned Qwen3-8B checkpoint (non-AWQ in this config).
+# - To reduce OOM risk on a single 24 GB L4, keep API-side embedder/reranker on CPU.
+# - Router uses vLLM backend and reuses the generator endpoint.
+
+gpu:
+  name: l4
+  arch: ada
+  vram_gb: 24
+
+generator:
+  model: TheFinAI/Fin-o1-8B
+  quantization: null
+  max_model_len: 4096
+  gpu_memory_utilization: 0.80
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  kv_cache_dtype: fp8_e4m3
+  enable_prefix_caching: true
+  enable_chunked_prefill: true
+  enforce_eager: false
+  served_model_name: generator
+
+specialist:
+  enabled: false
+  model: rLLM/rLLM-FinQA-4B
+  quantization: null
+  max_model_len: 4096
+  gpu_memory_utilization: 0.90
+  served_model_name: specialist
+
+router:
+  enabled: true
+  model: Qwen/Qwen3-1.7B
+  backend: vllm
+  device: cpu
+  max_new_tokens: 256
+
+embedding:
+  model: Qwen/Qwen3-Embedding-0.6B
+  device: cpu
+  batch_size: 32
+
+reranker:
+  model: Qwen/Qwen3-Reranker-0.6B
+  device: cpu
+  batch_size: 8
+
+retrieval:
+  retrieval_k: 20
+  rerank_k: 10
+  bm25_weight: 0.4
+  dense_weight: 0.6
+  rrf_k: 60
+
+generation:
+  temperature: 0.0
+  top_p: 1.0
+  self_consistency:
+    enabled: true
+    samples: 2
+    sampling_temperature: 0.6
+
+serving:
+  host: 127.0.0.1
+  port: 8000
+  api_host: 127.0.0.1
+  api_port: 8001
+  gradio_port: 7860
+  tunnel: cloudflared
