@@ -125,10 +125,15 @@ def build_index(
         n_records += 1
     log.info("Produced %d chunks from %d records.", len(chunks), n_records)
 
-    log.info("Loading embedder %s ...", cfg.embedding.model)
+    device = cfg.embedding.device
+    if cfg.gpu.name == "l4":
+        log.info("Overriding embedder device to cuda for L4 ingest speed")
+        device = "cuda"
+
+    log.info("Loading embedder %s on %s ...", cfg.embedding.model, device)
     embedder = Embedder(
         model_name=cfg.embedding.model,
-        device=cfg.embedding.device,
+        device=device,
         batch_size=cfg.embedding.batch_size,
     )
     texts = [c.text for c in chunks]

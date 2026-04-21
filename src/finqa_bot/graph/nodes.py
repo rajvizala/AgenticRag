@@ -127,7 +127,7 @@ def _get_structured_client(deps: PipelineDeps, specialist: bool) -> Any:
             model=model,
             temperature=deps.cfg.generation.temperature,
             top_p=deps.cfg.generation.top_p,
-            max_tokens=512,
+            max_tokens=1200,
         )
     except Exception as exc:
         log.warning("Failed to build %s structured client: %s", "specialist" if specialist else "generalist", exc)
@@ -343,18 +343,27 @@ def _repair_candidate_for_question(
                     return ratio_env, ratio_result, "ratio_subtract_to_divide"
 
     # Directional sign correction for change/increase/decrease questions.
-    if _is_change_question(question) and isinstance(result.value, int | float):
+    is_change = _is_change_question(question)
+    is_diff = "difference" in question.lower()
+    
+    if (is_change or is_diff) and isinstance(result.value, int | float):
         value = float(result.value)
-        wrong_sign = (_expects_positive_change(question) and value < 0.0) or (
-            _expects_negative_change(question) and value > 0.0
-        )
+        wrong_sign = False
+        if is_change:
+            wrong_sign = (_expects_positive_change(question) and value < 0.0) or (
+                _expects_negative_change(question) and value > 0.0
+            )
+        if is_diff and value < 0.0:
+            wrong_sign = True
+
         if wrong_sign:
             flipped = _flip_first_literal_subtract(env)
             if flipped is not None:
                 flipped_result = executor.run(flipped.program, document)
                 if flipped_result.ok and isinstance(flipped_result.value, int | float):
                     flipped.answer_value = flipped_result.value
-                    return flipped, flipped_result, "flip_subtract_direction"
+                    tag = "flip_subtract_for_difference" if is_diff and not is_change else "flip_subtract_direction"
+                    return flipped, flipped_result, tag
 
     return env, result, None
 
@@ -406,8 +415,11 @@ def node_generate(deps: PipelineDeps) -> Callable[[GraphState], GraphState]:
         while len(temps) < k:
             temps.append(sc.sampling_temperature)
 
+        use_grounding = deps.flag("groundedness", default=True)
+        checker = _ensure_groundedness(deps) if use_grounding else None
+
         t0 = perf_counter()
-        envelopes = await _sample_envelopes(client, messages, temps)
+        envelopes = await _sample_envelopes(client, messages, temps, hits=hits, checker=checker)
 
         # If the specialist model is not served (404) all samples fail and
         # envelopes is empty. Retry immediately with the generalist so the
@@ -420,7 +432,7 @@ def node_generate(deps: PipelineDeps) -> Callable[[GraphState], GraphState]:
             )
             fallback = _get_structured_client(deps, specialist=False)
             if fallback is not None:
-                envelopes = await _sample_envelopes(fallback, messages, temps)
+                envelopes = await _sample_envelopes(fallback, messages, temps, hits=hits, checker=checker)
                 specialist = False
 
         dt = perf_counter() - t0
@@ -461,7 +473,9 @@ async def _sample_envelopes(
     client: Any,
     messages: list[Any],
     temps: list[float],
-    max_retries: int = 2,
+    hits: list[RetrievalHit] | None = None,
+    checker: GroundednessChecker | None = None,
+    max_retries: int = 3,
     base_delay: float = 0.5,
 ) -> list[AnswerEnvelope]:
     """Fan out K LangChain structured-output calls at the given temperatures.
@@ -478,10 +492,14 @@ async def _sample_envelopes(
         for attempt in range(1, max_retries + 1):
             try:
                 result = await runnable.ainvoke(messages)
-                if isinstance(result, AnswerEnvelope):
-                    return result
                 if isinstance(result, dict):
-                    return AnswerEnvelope(**result)
+                    result = AnswerEnvelope(**result)
+                if isinstance(result, AnswerEnvelope):
+                    if checker is not None and hits is not None:
+                        ground = checker.check(result.program, hits)
+                        if not ground.ok:
+                            raise ValueError(f"Ungrounded numeric literals generated: {ground.missing}")
+                    return result
                 log.warning("Unexpected envelope type: %s", type(result).__name__)
                 return None
             except Exception as exc:

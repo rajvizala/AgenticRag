@@ -89,12 +89,25 @@ Useful flags:
 - `--share` - tunnel the Gradio UI publicly.
 - `--t4` / `--l4` - force GPU tier.
 - `--fin-o1` - run `TheFinAI/Fin-o1-8B` using `configs/l4_fino1.yaml`.
+- `--persist-gdrive` - restore/save `data/indices/dev` and `data/raw/finqa/dev.json` to Google Drive.
+- `--persist-dir=/path` - restore/save index cache to a custom persistent path.
 
 Example (L4 + Fin-o1-8B):
 
 ```bash
 bash setup.sh --fin-o1
 ```
+
+Example (Colab + persistent index cache in Google Drive):
+
+```bash
+# after mounting Drive
+bash setup.sh --fin-o1 --persist-gdrive
+```
+
+With persistence enabled, `setup.sh` restores cached index artifacts before
+ingest and syncs them back after ingest, so new Colab sessions can skip the
+expensive embedding/index build when cache already exists.
 
 ## Running the pieces by hand
 

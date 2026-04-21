@@ -67,7 +67,10 @@ class Embedder:
                         model_name,
                         cand,
                     )
-                self.dim = int(self.model.get_sentence_embedding_dimension() or 0)
+                if hasattr(self.model, "get_embedding_dimension"):
+                    self.dim = int(self.model.get_embedding_dimension() or 0)
+                else:
+                    self.dim = int(self.model.get_sentence_embedding_dimension() or 0)
                 return
             except Exception as exc:
                 tried.append((cand, str(exc)))

@@ -9,6 +9,8 @@
 #   bash setup.sh --l4            # force L4 config even if GPU is misidentified
 #   bash setup.sh --t4            # force T4 config
 #   bash setup.sh --fin-o1        # use configs/l4_fino1.yaml (Fin-o1-8B on L4)
+#   bash setup.sh --persist-gdrive
+#   bash setup.sh --persist-dir=/content/drive/MyDrive/finqa_bot_cache
 #
 # What this script does, in order:
 #   1. Pick a GPU config (T4 vs L4) by reading ``nvidia-smi --query-gpu=name``.
@@ -35,6 +37,7 @@ SKIP_VLLM=0
 SHARE=0
 FORCE_TIER=""
 FORCE_CONFIG=""
+PERSIST_DIR="${FINQA_PERSIST_DIR:-}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -44,6 +47,8 @@ for arg in "$@"; do
         --l4)          FORCE_TIER="l4" ;;
         --t4)          FORCE_TIER="t4" ;;
         --fin-o1)      FORCE_TIER="l4"; FORCE_CONFIG="configs/l4_fino1.yaml" ;;
+        --persist-gdrive) PERSIST_DIR="/content/drive/MyDrive/finqa_bot_cache" ;;
+        --persist-dir=*) PERSIST_DIR="${arg#--persist-dir=}" ;;
         --help|-h)
             sed -n '1,25p' "$0"
             exit 0
@@ -54,6 +59,70 @@ done
 
 log() { printf "[setup %s] %s\n" "$(date -u +'%H:%M:%S')" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+
+_copy_tree() {
+    local src="$1"
+    local dst="$2"
+    mkdir -p "$dst"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a "$src/" "$dst/"
+    else
+        cp -a "$src/." "$dst/"
+    fi
+}
+
+_restore_persisted_data() {
+    if [[ -z "$PERSIST_DIR" ]]; then
+        return
+    fi
+    local p="$PERSIST_DIR"
+    local local_data="$REPO_ROOT/data"
+    local persisted_index="$p/indices/dev"
+    local local_index="$local_data/indices/dev"
+    local persisted_raw="$p/raw/finqa/dev.json"
+    local local_raw="$local_data/raw/finqa/dev.json"
+
+    log "Persistence enabled: $p"
+    mkdir -p "$p"
+
+    if [[ -d "$persisted_index" ]]; then
+        log "Restoring cached index from $persisted_index"
+        mkdir -p "$local_index"
+        _copy_tree "$persisted_index" "$local_index"
+    else
+        log "No persisted index found at $persisted_index"
+    fi
+
+    if [[ -f "$persisted_raw" ]]; then
+        log "Restoring cached dev split from $persisted_raw"
+        mkdir -p "$(dirname "$local_raw")"
+        cp -f "$persisted_raw" "$local_raw"
+    fi
+}
+
+_sync_persisted_data() {
+    if [[ -z "$PERSIST_DIR" ]]; then
+        return
+    fi
+    local p="$PERSIST_DIR"
+    local local_data="$REPO_ROOT/data"
+    local persisted_index="$p/indices/dev"
+    local local_index="$local_data/indices/dev"
+    local persisted_raw="$p/raw/finqa/dev.json"
+    local local_raw="$local_data/raw/finqa/dev.json"
+
+    mkdir -p "$p/indices/dev" "$p/raw/finqa"
+
+    if [[ -d "$local_index" ]]; then
+        log "Syncing built index to $persisted_index"
+        _copy_tree "$local_index" "$persisted_index"
+    fi
+
+    if [[ -f "$local_raw" ]]; then
+        cp -f "$local_raw" "$persisted_raw"
+        log "Synced dev split to $persisted_raw"
+    fi
+}
 
 # --- Colab detection ----------------------------------------------------------
 _detect_colab() {
@@ -170,8 +239,12 @@ if [[ "$SKIP_VLLM" -eq 0 && "$TIER" != "none" ]]; then
     $PY -m pip install --quiet -e ".[serve]" || log "vLLM install failed; continuing without vllm."
 fi
 
+_restore_persisted_data
+
 log "Downloading FinQA dataset + building hybrid index"
 $PY -m finqa_bot.cli ingest --split dev | tee "$LOG_DIR/ingest.log"
+
+_sync_persisted_data
 
 if [[ "$INGEST_ONLY" -eq 1 ]]; then
     log "Ingest complete. Exiting per --ingest-only."
@@ -454,6 +527,7 @@ cat <<EOF
  FinQA bot is up.
  GPU tier       : ${TIER}
  Config         : ${CONFIG_PATH}
+ Persistence    : ${PERSIST_DIR:-disabled}
  vLLM endpoint  : http://127.0.0.1:8000/v1
  FastAPI        : http://127.0.0.1:${API_PORT}/health
  Gradio UI      : ${GRADIO_URL}

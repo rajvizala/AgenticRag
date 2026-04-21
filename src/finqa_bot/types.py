@@ -100,6 +100,10 @@ class AnswerEnvelope(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    extracted_evidence: str = Field(
+        default="",
+        description="First step: quote the exact table rows or text you will use, including values and years.",
+    )
     program: list[Step] = Field(default_factory=list)
     answer_value: float | str = Field(description="Numeric answer or 'yes'/'no' for greater.")
     answer_form: AnswerForm = Field(default="decimal")
